@@ -419,8 +419,8 @@ tests whether these broader conditions line up with, and help predict,
 periods of unusually high youth unemployment.</p>
 </blockquote>
 </div>
-<div id="data-import-raw-files-separate-objects" class="section level1">
-<h1>2. Data Import (raw files, separate objects)</h1>
+<div id="data-import" class="section level1">
+<h1>2. Data Import</h1>
 <blockquote>
 <p>This project uses several macroeconomic datasets from the Federal
 Reserve Economic Data (FRED) database to provide context around youth
@@ -471,8 +471,8 @@ dspic &lt;- read_fred(file.path(data_path, &quot;DSPIC96.xlsx&quot;), &quot;DSPI
 sahm &lt;- read_fred(file.path(data_path, &quot;SAHMCURRENT.xlsx&quot;), &quot;SAHMCURRENT&quot;) %&gt;%
   rename(sahm = value)</code></pre>
 </div>
-<div id="define-high-risk-months" class="section level1">
-<h1>3. Define High-Risk Months</h1>
+<div id="high-risk-months" class="section level1">
+<h1>3. High-Risk Months</h1>
 <blockquote>
 <p>Here, I turn the continuous youth unemployment rate into a simple
 label: high-risk month vs not high-risk month. The rule is: “high-risk”
@@ -526,8 +526,8 @@ which motivates me to use macroeconomic variables to study these
 high-risk months in this project.</p>
 </blockquote>
 </div>
-<div id="modeling-data-constructed-only-here" class="section level1">
-<h1>5. Modeling data (constructed only here)</h1>
+<div id="modeling-data" class="section level1">
+<h1>5. Modeling data</h1>
 <blockquote>
 <p>This is the first place we temporarily assemble a modeling table,
 because supervised learning models need a single dataset. I also create
@@ -691,8 +691,8 @@ remains good at ranking risky months above non-risky ones, which
 supports the reliability of the classification results.</p>
 </blockquote>
 </div>
-<div id="clustering-takeaways" class="section level1">
-<h1>10. Clustering + Takeaways</h1>
+<div id="clustering-and-conclusion" class="section level1">
+<h1>10. Clustering and Conclusion</h1>
 <blockquote>
 <p>The confusion matrix shows how the model performs on new data. The
 model correctly identifies almost all high-risk months and does not

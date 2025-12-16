@@ -37,7 +37,7 @@ data_path <- "/Users/fimaliya/AliyaFinalProject"
 > **The project takes the months of high youth unemployment as a given and asks whether the rest of the economy helps explain when and why they occur.** Using other macroeconomic datasets, such as overall unemployment, inflation, and recession indicators, the analysis tests whether these broader conditions line up with, and help predict, periods of unusually high youth unemployment.
 
 
-# 2. Data Import (raw files, separate objects)
+# 2. Data Import
 
 >  This project uses several macroeconomic datasets from the Federal Reserve Economic Data (FRED) database to provide context around youth unemployment. Youth unemployment among ages 16–19 (LNS14000012) serves as the main outcome, identifying periods when young people face unusually weak labor market conditions. Datasets include overall unemployment (UNRATE), which captures broader labor market stress; youth labor force participation (LNS11300012), which helps distinguish between unemployment and non-participation; inflation measured by the Consumer Price Index (CPIAUCSL), which reflects cost-of-living pressures; and the Sahm recession indicator (SAHMCURRENT), which signals periods of economic downturn. 
 
@@ -77,7 +77,7 @@ sahm <- read_fred(file.path(data_path, "SAHMCURRENT.xlsx"), "SAHMCURRENT") %>%
 ```
 
 
-# 3. Define High-Risk Months
+# 3. High-Risk Months
 
 > Here, I turn the continuous youth unemployment rate into a simple label: high-risk month vs not high-risk month. The rule is: “high-risk” means youth unemployment is in the top 20% of all months in the dataset (above the 80th percentile).
 
@@ -113,7 +113,7 @@ labs(title = "Youth Unemployment (16–19)", x = NULL, y = "Percent")
 
 > The graph suggests that high **youth unemployment is closely tied to broader economic stress** rather than occurring randomly, which motivates me to use macroeconomic variables to study these high-risk months in this project.
 
-# 5. Modeling data (constructed only here)
+# 5. Modeling data
 
 > This is the first place we temporarily assemble a modeling table, because supervised learning models need a single dataset. I also create lagged variables: unrate_l1 = last month’s unemployment, unrate_l3 = unemployment three months ago, and infl_l1 = last month’s inflation.
 
@@ -212,7 +212,7 @@ roc_curve(logit_preds, truth = high_risk, !!rlang::sym(prob_col)) %>%
 
 > The curve stays well above the diagonal and rises sharply toward the top-left corner, the model has strong discriminatory power. This means it generally assigns higher predicted probabilities to true high-risk months than to low-risk months. Even when the cutoff changes, the model remains good at ranking risky months above non-risky ones, which supports the reliability of the classification results.
 
-# 10. Clustering + Takeaways
+# 10. Clustering and Conclusion
 
 > The confusion matrix shows how the model performs on new data. The model correctly identifies almost all high-risk months and does not label any low-risk months as high-risk. This means it is cautious: when it predicts a high-risk month, it is usually right. It does miss a small number of high-risk months, which shows that the model is not perfect. Overall, the results suggest that the model captures the main patterns without overreacting or making many false claims. Clustering is a bit extra, but I wanted to add something unsupervised.
 
