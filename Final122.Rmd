@@ -1,0 +1,232 @@
+
+title: "Macro Conditions and Youth Unemployment as a Proxy for Crime Pressure"
+author: "Aliya Salikhzyanova"
+date: "`r Sys.Date()`"
+output:
+  github_document:
+    toc: true
+    toc_depth: 2
+---
+
+
+
+```{r}
+knitr::opts_chunk$set(
+echo = TRUE,
+message = FALSE,
+warning = FALSE,
+fig.width = 7,
+fig.height = 4
+)
+
+library(tidyverse)
+library(lubridate)
+library(tidymodels)
+library(janitor)
+library(readxl)
+theme_set(theme_minimal())
+
+data_path <- "/Users/fimaliya/AliyaFinalProject"
+```
+
+
+# 1. Research Question
+
+> This project examines whether broad macroeconomic conditions can help identify periods of unusually high youth unemployment. Because monthly crime data are not available in FRED, youth unemployment among ages 16–19 is used as a proxy for periods of elevated social and economic pressure. 
+
+> **The project takes the months of high youth unemployment as a given and asks whether the rest of the economy helps explain when and why they occur.** Using other macroeconomic datasets, such as overall unemployment, inflation, and recession indicators, the analysis tests whether these broader conditions line up with, and help predict, periods of unusually high youth unemployment.
+
+
+# 2. Data Import (raw files, separate objects)
+
+>  This project uses several macroeconomic datasets from the Federal Reserve Economic Data (FRED) database to provide context around youth unemployment. Youth unemployment among ages 16–19 (LNS14000012) serves as the main outcome, identifying periods when young people face unusually weak labor market conditions. Datasets include overall unemployment (UNRATE), which captures broader labor market stress; youth labor force participation (LNS11300012), which helps distinguish between unemployment and non-participation; inflation measured by the Consumer Price Index (CPIAUCSL), which reflects cost-of-living pressures; and the Sahm recession indicator (SAHMCURRENT), which signals periods of economic downturn. 
+
+> Each spreadsheet is a **time series**: a list of months (or quarters) and a value. I don’t assume everything belongs in one big table from the start. But I do treat each series as its own “archival record” and only combine them later when I need to compare them or run a model. 
+
+
+```{r}
+read_fred <- function(path, series_name) {
+  read_excel(path) %>%
+    clean_names() %>%
+    rename(
+      date = observation_date,
+      value = !!sym(tolower(series_name))
+    ) %>%
+    mutate(
+      date = as.Date(date),
+      value = as.numeric(value)
+    ) %>%
+    arrange(date)
+}
+
+youth_unemp <- read_fred(file.path(data_path, "LNS14000012.xlsx"), "LNS14000012") %>%
+  rename(youth_unemp = value)
+youth_lfp <- read_fred(file.path(data_path, "LNS11300012.xlsx"), "LNS11300012") %>%
+  rename(youth_lfp = value)
+unrate <- read_fred(file.path(data_path, "UNRATE.xlsx"), "UNRATE") %>%
+  rename(unrate = value)
+cpi <- read_fred(file.path(data_path, "CPIAUCSL.xlsx"), "CPIAUCSL") %>%
+  rename(cpi = value) %>%
+  mutate(
+    inflation_yoy = 100 * (cpi / lag(cpi, 12) - 1)
+  )
+dspic <- read_fred(file.path(data_path, "DSPIC96.xlsx"), "DSPIC96") %>%
+  rename(dspic96 = value)
+sahm <- read_fred(file.path(data_path, "SAHMCURRENT.xlsx"), "SAHMCURRENT") %>%
+  rename(sahm = value)
+```
+
+
+# 3. Define High-Risk Months
+
+> Here, I turn the continuous youth unemployment rate into a simple label: high-risk month vs not high-risk month. The rule is: “high-risk” means youth unemployment is in the top 20% of all months in the dataset (above the 80th percentile).
+
+
+```{r}
+threshold <- quantile(youth_unemp$youth_unemp, 0.80, na.rm = TRUE)
+youth_unemp <- youth_unemp %>%
+mutate(high_risk = as.factor(youth_unemp >= threshold))
+table(youth_unemp$high_risk)
+```
+
+> **193 months are high-risk.**
+
+> **740 months are not high-risk.**
+
+> The outcome is imbalanced: high-risk months are less common. 
+> Imbalance affects evaluation: a model can look good just by guessing the majority class. That’s why I later use ROC curves and confusion matrices too.
+
+
+# 4. EDA
+
+> The key thing I’m looking for here is: do spikes in youth unemployment visually line up with macro stress (higher overall unemployment or recession periods). 
+
+```{r}
+eda_tmp <- youth_unemp %>%
+left_join(unrate, by = "date")
+ggplot(eda_tmp, aes(date, youth_unemp)) +
+geom_line() +
+labs(title = "Youth Unemployment (16–19)", x = NULL, y = "Percent")
+```
+
+> The youth unemployment series shows a clear cyclical pattern over time, with sharp spikes during major economic downturns. In particular, youth unemployment rises noticeably during the early 1980s recession, the Great Recession, and most dramatically during the COVID-19 period, where it briefly exceeds 30 percent. 
+
+> The graph suggests that high **youth unemployment is closely tied to broader economic stress** rather than occurring randomly, which motivates me to use macroeconomic variables to study these high-risk months in this project.
+
+# 5. Modeling data (constructed only here)
+
+> This is the first place we temporarily assemble a modeling table, because supervised learning models need a single dataset. I also create lagged variables: unrate_l1 = last month’s unemployment, unrate_l3 = unemployment three months ago, and infl_l1 = last month’s inflation.
+
+> Social and economic conditions often influence outcomes with a delay. drop_na() removes months where some variables don’t exist. That makes sure the model is trained on complete information.
+
+```{r}
+model_tmp <- youth_unemp %>%
+left_join(youth_lfp, by = "date") %>%
+left_join(unrate, by = "date") %>%
+left_join(cpi %>% select(date, inflation_yoy), by = "date") %>%
+left_join(sahm, by = "date") %>%
+arrange(date) %>%
+mutate(
+unrate_l1 = lag(unrate, 1),
+unrate_l3 = lag(unrate, 3),
+infl_l1   = lag(inflation_yoy, 1)
+) %>%
+drop_na()
+```
+
+# 6. Time-based Train/Test Split
+
+```{r}
+set.seed(122)
+split <- initial_time_split(model_tmp, prop = 0.75)
+train <- training(split)
+test  <- testing(split)
+range(train$date)
+range(test$date)
+```
+
+> I'm not randomly shuffling months, because that would allow “future information” to leak into the past. Instead, the model learns from earlier history, and then I test it on a later era. That makes the evaluation more honest and closer to how prediction would work irl.
+
+
+# 7. Logistic Regression
+
+> Logistic regression estimates the probability that a month is high-risk (TRUE) based on macro variables. Each coefficient tells us how a predictor shifts the log-odds of being high-risk.
+
+```{r}
+logit_fit <- logistic_reg() %>%
+set_engine("glm") %>%
+fit(
+high_risk ~ youth_lfp + unrate + unrate_l1 + unrate_l3 +
+inflation_yoy + infl_l1 + sahm,
+data = train
+)
+
+tidy(logit_fit)
+```
+
+> The logistic regression models the probability that a given month falls into the “high youth unemployment” category based on broader macroeconomic conditions. 
+
+> The strongest signal comes from the overall **unemployment rate**: its large positive coefficient (4.93) and very small p-value indicate that months with higher general unemployment are far more likely to coincide with elevated youth unemployment, even after controlling for other factors. 
+
+> **Youth labor force participation** has a negative and statistically significant coefficient, suggesting that when a larger share of young people are actively engaged in the labor market, extreme youth unemployment is less likely.
+
+> **Inflation** shows a more nuanced temporal pattern: current inflation is negatively associated with high-risk months, while lagged inflation is positively associated, implying that changes in inflation over time matter more than inflation levels alone. 
+
+> The **Sahm recession indicator** is also highly significant, but its negative sign reflects overlap with the unemployment variables already in the model; once unemployment is explicitly controlled for, Sahm captures residual dynamics rather than recession risk per se. Importantly, several lagged unemployment terms are not statistically significant, indicating that current labor market conditions dominate past values once the full macroeconomic context is taken into account.
+
+# 8. Random Forest
+
+```{r}
+rf_fit <- rand_forest(trees = 500) %>%
+set_engine("ranger", importance = "impurity") %>%
+set_mode("classification") %>%
+fit(
+high_risk ~ youth_lfp + unrate + unrate_l1 + unrate_l3 +
+inflation_yoy + infl_l1 + sahm,
+data = train
+)
+rf_obj <- rf_fit$fit
+ranger::importance(rf_obj)
+```
+
+> Overall **unemployment is by far the most important variable**, followed by its recent past values. Youth labor force participation also matters, but less than general unemployment. Inflation and the Sahm indicator play smaller roles. What matters most is that this method points to the same main story as the logistic regression: high youth unemployment months tend to happen when the overall labor market is under stress. Feature importance is reported using impurity-based measures, which are descriptive and may be biased, but are sufficient here for comparing relative signals across variables.
+
+
+# 9. Model Evaluation
+
+
+```{r}
+logit_preds <- predict(logit_fit, test, type = "prob") %>%
+  bind_cols(predict(logit_fit, test, type = "class")) %>%
+  bind_cols(test %>% select(high_risk))
+conf_mat(logit_preds, truth = high_risk, estimate = .pred_class)
+```
+
+> Out of all the months that were truly not high-risk, the model correctly labels 148 of them and does not mistakenly flag any low-risk month as high-risk. For high-risk months, the model correctly identifies 75 cases, but misses 7, labeling them as low-risk instead. This means the model is conservative. The results suggest that the model captures the main patterns in the data without over-predicting risk.
+
+```{r}
+prob_col <- paste0(".pred_", levels(logit_preds$high_risk)[2])
+roc_curve(logit_preds, truth = high_risk, !!rlang::sym(prob_col)) %>%
+  autoplot()
+```
+
+> The curve stays well above the diagonal and rises sharply toward the top-left corner, the model has strong discriminatory power. This means it generally assigns higher predicted probabilities to true high-risk months than to low-risk months. Even when the cutoff changes, the model remains good at ranking risky months above non-risky ones, which supports the reliability of the classification results.
+
+# 10. Clustering + Takeaways
+
+> The confusion matrix shows how the model performs on new data. The model correctly identifies almost all high-risk months and does not label any low-risk months as high-risk. This means it is cautious: when it predicts a high-risk month, it is usually right. It does miss a small number of high-risk months, which shows that the model is not perfect. Overall, the results suggest that the model captures the main patterns without overreacting or making many false claims. Clustering is a bit extra, but I wanted to add something unsupervised.
+
+```{r}
+cluster_tmp <- model_tmp %>%
+select(youth_lfp, unrate, inflation_yoy, sahm) %>%
+scale()
+set.seed(122)
+k_fit <- kmeans(cluster_tmp, centers = 3)
+k_fit$centers
+```
+
+> Overall, this project shows that high youth unemployment months are closely tied to broader macroeconomic conditions rather than occurring randomly. Both the logistic regression and the random forest point to overall labor market stress as the most important factor. 
+
+> The results suggest that **even without direct crime data, macroeconomic variables** (UNRATE, CPI, etc.) **contain meaningful information about periods of elevated youth unemployment**. 
+
+> **Thank you, Professor Gelman!**
